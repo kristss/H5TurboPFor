@@ -38,7 +38,7 @@ find_path(turbopfor_INCLUDE_DIRS
   HINTS ${turbopfor_ROOT_DIR})
 find_library(turbopfor_LIBRARIES
   NAMES ic
-  HINTS ${turbopfor_ROOT_DIR}/include)
+  HINTS ${turbopfor_ROOT_DIR})
   
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(turbopfor DEFAULT_MSG turbopfor_LIBRARIES turbopfor_INCLUDE_DIRS)
