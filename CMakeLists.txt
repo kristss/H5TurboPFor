@@ -35,10 +35,11 @@ find_package(MPI REQUIRED)
 set(turbopfor_ROOT_DIR $ENV{TurboPFor_HOME})
 find_path(turbopfor_INCLUDE_DIRS
   NAMES vp4.h
-  HINTS ${turbopfor_ROOT_DIR})
+  HINTS ${turbopfor_ROOT_DIR}/lib/include_)
+
 find_library(turbopfor_LIBRARIES
   NAMES ic
-  HINTS ${turbopfor_ROOT_DIR})
+  HINTS ${turbopfor_ROOT_DIR}/include)
   
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(turbopfor DEFAULT_MSG turbopfor_LIBRARIES turbopfor_INCLUDE_DIRS)
