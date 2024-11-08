@@ -32,14 +32,13 @@ find_package(MPI REQUIRED)
 ##
 ## Change here for a different place of TurboPFor-Integer-Compression
 ##
-set(turbopfor_ROOT_DIR $ENV{TurboPFor_HOME})
+set(turbopfor_ROOT_DIR "/opt/turbopfor")
 find_path(turbopfor_INCLUDE_DIRS
   NAMES vp4.h
-  HINTS ${turbopfor_ROOT_DIR}/lib/include_)
-
+  HINTS ${turbopfor_ROOT_DIR})
 find_library(turbopfor_LIBRARIES
   NAMES ic
-  HINTS ${turbopfor_ROOT_DIR}/include)
+  HINTS ${turbopfor_ROOT_DIR})
   
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(turbopfor DEFAULT_MSG turbopfor_LIBRARIES turbopfor_INCLUDE_DIRS)
