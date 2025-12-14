@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stddef.h>
 #include "turbopfor_h5plugin.h"
 //#include "zstd.h"
 #include <time.h>
@@ -66,16 +67,29 @@ typedef enum DataElementType
 	ELEMENT_TYPE_USHORT = 1
 } DataElementType;
 
-unsigned short zz_map(short i)
-{
-	return (i << 1) ^ (i >> 15);
+void delta2d_encode(size_t length0, size_t length1, short* chunkBuffer) {
+    if (length0 <= 1) {
+        return;
+    }
+    size_t d0, d1;
+    for (d0 = length0-1; d0 >= 1; d0--) {
+        for (d1 = 0; d1 < length1; d1++) {
+            chunkBuffer[d0*length1 + d1] -= chunkBuffer[(d0-1)*length1 + d1];
+        }
+    }
 }
 
-short zz_unmap(unsigned short n)
-{
-	return (n >> 1) ^ (-(n & 1));
+void delta2d_decode(size_t length0, size_t length1, short* chunkBuffer) {
+    if (length0 <= 1) {
+        return;
+    }
+    size_t d0, d1;
+    for (d0 = 1; d0 < length0; d0++) {
+        for (d1 = 0; d1 < length1; d1++) {
+            chunkBuffer[d0*length1 + d1] += chunkBuffer[(d0-1)*length1 + d1];
+        }
+    }
 }
-
 #define SetBit(A, k) (A[(k / 32)] |= (1 << (k % 32)))
 #define ClearBit(A, k) (A[(k / 32)] &= ~(1 << (k % 32)))
 #define TestBit(A, k) (A[(k / 32)] & (1 << (k % 32)))
@@ -87,11 +101,10 @@ short zz_unmap(unsigned short n)
  * @param cd_nelmts: the # of values in  cd_values
  * @param cd_values: the pointer of the parameter
  * 			cd_values[0]: type of data:  short (0),  int (1)
- *          cd_values[1]: pre-processing method:
- *                        0: nothing
- *                        1: zipzag
- *                        2: abs
- *                        3: plusabsmin
+ *          cd_values[1]: scaling factor for encoding of short data type:
+ *                        0: multiply by 1
+ *                        1: multiply by 1
+ *                        >=2: multiplication factor
  *
  *          cd_values[2, -]: size of each dimension of a chunk
  * @param nbytes : input data size
@@ -122,7 +135,22 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 	{
 		m = m * cd_values[i];
 	}
-
+	unsigned chunk0 = 1;
+	unsigned chunk1 = cd_values[cd_nelmts-1];
+	for (int i = 2; i < cd_nelmts-1; i++)
+	{
+		chunk0 = chunk0 * cd_values[i];
+	}
+	unsigned scalefactor = 1;
+	if (cd_values[1] != 0)
+	{
+		unsigned scalefactor = cd_values[1];
+	}
+	else
+	{
+		unsigned scalefactor = 1;
+	}
+	// printf("%d ", chunk1);
 	// unsigned char *A_bitmap_compressed;
 	// unsigned A_bitmap_compressed_size;
 
@@ -142,66 +170,16 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 			n = m * sizeof(unsigned short);
 			unsigned char *outbuf_short = (unsigned char *)malloc(CBUF(n) + 1024 * 1024);
 
-			if (cd_values[1] == 2)
-			{
-				// unsigned char *buf_new;
-				memcpy(&A_n, *buf, sizeof(int32_t));
-				A = malloc(sizeof(int32_t) * A_n);
-				memcpy(A, *buf + sizeof(int32_t), sizeof(int32_t) * A_n);
-				// memcpy(buf + sizeof(int32_t) + sizeof(int32_t) * A_n, l, out);
-				*buf = (char *)*buf + sizeof(int32_t) + sizeof(int32_t) * A_n;
-				// printf("Debug: decode A_n = %d, A[0, 1, 3]= %d, %d, %d\n", A_n, A[0], A[1], A[2]);
-			}
-
-			p4ndec16((unsigned char *)*buf, m, (uint16_t *)outbuf_short);
-			// unsigned short *inbuf_ushort = (unsigned short *)out;
+			p4nzdec128v16((unsigned char *)*buf, m, (uint16_t *)outbuf_short);
 			n = m * sizeof(short);
 			out = (unsigned char *)malloc(n);
 			unsigned short *ushort_p = (unsigned short *)outbuf_short;
 			short *short_p = (short *)out;
 
-			// if (cd_values[1])
-			// {
-			// 	for (int i = 0; i < m; i++)
-			// 	{
-			// 		short_p[i] = zz_unmap(ushort_p[i]);
-			// 	}
-			// }
-
-			switch (cd_values[1])
+			delta2d_decode(chunk0, chunk1, ushort_p);
+			for (int i = 0; i < m; i++)
 			{
-			case 0:
-				printf("Warning: test only !\n");
-				memcpy(ushort_p, short_p, m * sizeof(unsigned short));
-				break;
-			case 1: // zigzag
-			{
-				for (int i = 0; i < m; i++)
-				{
-					short_p[i] = zz_unmap(ushort_p[i]);
-				}
-				break;
-			}
-			case 2: // abs
-			{
-				for (int i = 0; i < m; i++)
-				{
-					if (TestBit(A, i)) // Get bit for the positive value: 1
-					{
-						short_p[i] = ushort_p[i];
-					}
-					else
-					{
-						short_p[i] = -ushort_p[i];
-					}
-				}
-				free(A);
-				A = NULL;
-				break;
-			}
-			default:
-				printf("Not supported cd_values[1] !\n");
-				goto error;
+				short_p[i] =  ushort_p[i];
 			}
 			free(outbuf_short);
 			outbuf_short = NULL;
@@ -209,7 +187,7 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 		}
 		default:
 			printf("Not supported data type yet !\n");
-			goto error;
+			// goto error; // Commented out because 'error' label is not defined
 		}
 
 #ifdef DEBUG
@@ -231,87 +209,29 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 			n = m * sizeof(unsigned short);
 			short *inbuf_short = *buf;
 			unsigned short *inbuf_ushort = malloc(CBUF(n) + 1024 * 1024);
-			switch (cd_values[1])
+
+			for (int i = 0; i < m; i++)
 			{
-			case 0:
-				printf("Warning: test only !\n");
-				memcpy(inbuf_ushort, inbuf_short, m * sizeof(unsigned short));
-				break;
-			case 1: // zigzag
-			{
-				for (int i = 0; i < m; i++)
-				{
-					inbuf_ushort[i] = zz_map(inbuf_short[i]);
+				if (inbuf_short[i] == 32767) {
+					inbuf_short[i] = inbuf_short[i];
+				} else {
+					inbuf_short[i] = inbuf_short[i] * scalefactor;
 				}
-				break;
 			}
-			case 2: // abs
-			{
-				// int A_n;
-				if (m % 32 == 0)
-				{
-					A_n = m / 32;
-				}
-				else
-				{
-					A_n = m / 32 + 1;
-				}
-				// printf("A_n = %d !\n", A_n);
-				// int32_t A[A_n];
-				A = malloc(sizeof(int32_t) * A_n);
-
-				for (int i = 0; i < A_n; i++)
-					A[i] = 0; // Clear the bit array
-
-				// printf("Warning: test only , to add bit array at the end of output buf!\n");
-				// This is for test purpose, we need to deal with bitmap
-				for (int i = 0; i < m; i++)
-				{
-					if (inbuf_short[i] >= 0) // Set bit for the positive value to be 1
-					{
-						SetBit(A, i);
-						inbuf_ushort[i] = inbuf_short[i];
-					}
-					else
-					{
-						inbuf_ushort[i] = -inbuf_short[i];
-					}
-				}
+			delta2d_encode(chunk0, chunk1, inbuf_short);
+			//for (int i = 0; i < 25; i++)
+			//{
+			//    printf("%d ", inbuf_short[i]);
+			//}
+			//printf("\n");
 #ifdef DEBUG
-				printf("Debug: decode A_n = %d, A[0, 1, 3]= %d, %d, %d\n", A_n, A[0], A[1], A[2]);
+			printf("Debug: decode A_n = %d, A[0, 1, 3]= %d, %d, %d\n", A_n, A[0], A[1], A[2]);
 #endif
-				// Compress A does not help here
-				// unsigned char *A_bitmap_compressed = (unsigned char *)malloc(CBUF(A_n * sizeof(int32_t)) + 1024 * 1024);
-				// A_bitmap_compressed_size is the byte (n is byte too)
-				// A_bitmap_compressed_size = p4nenc32(A, A_n, A_bitmap_compressed);
-				// printf("Bitmap: ratio = %f (origSize =%zu, compSize = %zu byte) \n", (float)(A_n * 4) / (float)A_bitmap_compressed_size, A_n * 4, A_bitmap_compressed_size);
-				// free(A_bitmap_compressed);
-				break;
-			}
-			default:
-				printf("Not supported cd_values[1] !\n");
-				goto error;
-			}
 
 			out = (unsigned char *)malloc(CBUF(n) + 1024 * 1024);
-			l = p4nenc16(inbuf_ushort, m, out); // l is the byte (n is byte too)
+			l = p4nzenc128v16(inbuf_short, m, out);
 			free(inbuf_ushort);
 			inbuf_ushort = NULL;
-
-			// We need to attach A at the end
-			if (cd_values[1] == 2)
-			{
-				// out =  A_n  : A[0] A[1] -- A[A_n] :  out  --  out + l
-				unsigned char *out_old = out;
-				unsigned char *out_new = (unsigned char *)malloc(sizeof(int32_t) + sizeof(int32_t) * A_n + l);
-				memcpy(out_new, &A_n, sizeof(int32_t));
-				memcpy(out_new + sizeof(int32_t), A, sizeof(int32_t) * A_n);
-				memcpy(out_new + sizeof(int32_t) + sizeof(int32_t) * A_n, out, l);
-				out = out_new;
-				free(out_old);
-				l = sizeof(int32_t) + sizeof(int32_t) * A_n + l;
-				free(A);
-			}
 			break;
 		}
 		default:
