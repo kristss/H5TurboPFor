@@ -32,10 +32,20 @@ find_package(MPI REQUIRED)
 ##
 ## Change here for a different place of TurboPFor-Integer-Compression
 ##
-set(turbopfor_ROOT_DIR "/opt/turbopfor")
+if(NOT DEFINED turbopfor_ROOT_DIR)
+    if(DEFINED ENV{TurboPFor_HOME})
+        set(turbopfor_ROOT_DIR "$ENV{TurboPFor_HOME}")
+    else()
+        # Default to a sibling directory or a standard location
+        set(turbopfor_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../TurboPFor-Integer-Compression")
+    endif()
+endif()
+
+message(STATUS "Looking for TurboPFor in: ${turbopfor_ROOT_DIR}")
+
 find_path(turbopfor_INCLUDE_DIRS
   NAMES vp4.h
-  HINTS ${turbopfor_ROOT_DIR}/lib/include_)
+  HINTS ${turbopfor_ROOT_DIR} ${turbopfor_ROOT_DIR}/lib/include_)
 find_library(turbopfor_LIBRARIES
   NAMES ic
   HINTS ${turbopfor_ROOT_DIR})

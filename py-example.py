@@ -3,11 +3,11 @@ import subprocess
 import h5py
 
 # -----------------------------------------------------------------------------
-# Build steps
+# Build steps (Removed - please build manually as per README)
 # -----------------------------------------------------------------------------
-subprocess.run(["cmake", "."], check=True)
-subprocess.run(["make"], check=True)
-subprocess.run(["make", "install"], check=True)
+# subprocess.run(["cmake", "."], check=True)
+# subprocess.run(["make"], check=True)
+# subprocess.run(["make", "install"], check=True)
 
 # -----------------------------------------------------------------------------
 # Environment setup
@@ -87,20 +87,19 @@ def process_data(original_das_file: str, compressed_das_file: str) -> None:
 # -----------------------------------------------------------------------------
 def process_multiple_files(file_names):
     for file_name in file_names:
-        original_path = f"/mnt/SSD1/data/s3_performance_tests/{file_name}"
-        compressed_path = (
-            f"/home/kristian/bingdong/H5TurboPFor/"
-            f"{file_name.rsplit('.', 1)[0]}_compressed_pfor.h5"
-        )
+        # Use local file for example
+        original_path = file_name
+        compressed_path = f"{file_name.rsplit('.', 1)[0]}_compressed_pfor.h5"
+        
+        if not os.path.exists(original_path):
+            print(f"Skipping {original_path}: File not found")
+            continue
+
+        print(f"Processing {original_path} -> {compressed_path}")
         process_data(original_path, compressed_path)
 
 file_names = [
-    "tm_1991_to_2021.h5",
-    "tnb_1991_to_2021.h5",
-    "txb_1991_to_2021.h5",
-    "tm_1960_to_1990.h5",
-    "txb_1960_to_1990.h5",
-    "tnb_1960_to_1990.h5",
+    "das_example.h5",
 ]
 
 process_multiple_files(file_names)

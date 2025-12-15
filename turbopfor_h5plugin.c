@@ -141,18 +141,9 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 	{
 		chunk0 = chunk0 * cd_values[i];
 	}
-	unsigned scalefactor = 1;
-	if (cd_values[1] != 0)
-	{
-		unsigned scalefactor = cd_values[1];
-	}
-	else
-	{
-		unsigned scalefactor = 1;
-	}
-	// printf("%d ", chunk1);
-	// unsigned char *A_bitmap_compressed;
-	// unsigned A_bitmap_compressed_size;
+	
+    // Note: cd_values[1] (scalefactor) is ignored in this version.
+    // Quantization should be performed before passing data to the filter.
 
 	int32_t *A;
 	int A_n;
@@ -173,14 +164,14 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 			p4nzdec128v16((unsigned char *)*buf, m, (uint16_t *)outbuf_short);
 			n = m * sizeof(short);
 			out = (unsigned char *)malloc(n);
-			unsigned short *ushort_p = (unsigned short *)outbuf_short;
-			short *short_p = (short *)out;
+			
+            // Copy decoded data to output buffer
+            memcpy(out, outbuf_short, n);
+            short *short_p = (short *)out;
 
-			delta2d_decode(chunk0, chunk1, ushort_p);
-			for (int i = 0; i < m; i++)
-			{
-				short_p[i] =  ushort_p[i];
-			}
+            // Apply Delta Decoding
+			delta2d_decode(chunk0, chunk1, short_p);
+            
 			free(outbuf_short);
 			outbuf_short = NULL;
 			break;
@@ -208,30 +199,16 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 		{
 			n = m * sizeof(unsigned short);
 			short *inbuf_short = *buf;
-			unsigned short *inbuf_ushort = malloc(CBUF(n) + 1024 * 1024);
-
-			for (int i = 0; i < m; i++)
-			{
-				if (inbuf_short[i] == 32767) {
-					inbuf_short[i] = inbuf_short[i];
-				} else {
-					inbuf_short[i] = inbuf_short[i] * scalefactor;
-				}
-			}
+			
+            // Apply Delta Encoding (In-Place)
 			delta2d_encode(chunk0, chunk1, inbuf_short);
-			//for (int i = 0; i < 25; i++)
-			//{
-			//    printf("%d ", inbuf_short[i]);
-			//}
-			//printf("\n");
+
 #ifdef DEBUG
 			printf("Debug: decode A_n = %d, A[0, 1, 3]= %d, %d, %d\n", A_n, A[0], A[1], A[2]);
 #endif
 
 			out = (unsigned char *)malloc(CBUF(n) + 1024 * 1024);
 			l = p4nzenc128v16(inbuf_short, m, out);
-			free(inbuf_ushort);
-			inbuf_ushort = NULL;
 			break;
 		}
 		default:
