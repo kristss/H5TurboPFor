@@ -1,7 +1,23 @@
-import h5py
-import numpy as np
 import os
 import sys
+
+# --- Auto-configure HDF5 Plugin Path for Testing ---
+# If HDF5_PLUGIN_PATH is not set, try to find the build directory relative to this script
+# MUST BE DONE BEFORE IMPORTING h5py
+if "HDF5_PLUGIN_PATH" not in os.environ:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    build_dir = os.path.join(project_root, "build")
+    
+    if os.path.exists(os.path.join(build_dir, "libH5Zturbopfor.so")) or \
+       os.path.exists(os.path.join(build_dir, "libH5Zturbopfor.dylib")):
+        print(f"Auto-configuring HDF5_PLUGIN_PATH to: {build_dir}")
+        os.environ["HDF5_PLUGIN_PATH"] = build_dir
+    else:
+        print("Warning: Could not find libH5Zturbopfor.so in build/. Please run 'source setup.sh' or build the project.")
+
+import h5py
+import numpy as np
 
 # Configuration
 FILE_NAME = "validation_test.h5"
