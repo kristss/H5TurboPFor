@@ -1,4 +1,3 @@
-import h5py
 import numpy as np
 import os
 import sys
@@ -16,11 +15,13 @@ if "HDF5_PLUGIN_PATH" not in os.environ:
     else:
         print("Warning: Could not find libH5Zturbopfor.so in build/. Please run 'source setup.sh' or build the project.")
 
+import h5py
+
 # Configuration
 OUTPUT_FILE = "demo_weather_data.h5"
 FILTER_ID = 62016
 SHAPE = (100, 100, 100) # Time, Lat, Lon
-CHUNK_SHAPE = (1, 100, 100) # Chunk per time step
+CHUNK_SHAPE = (100, 20, 20) # Optimized for Timeseries 
 
 def generate_weather_data(shape):
     """Generates synthetic temperature-like data (smooth gradients)."""
@@ -38,28 +39,54 @@ def generate_weather_data(shape):
     data += np.random.normal(0, 0.5, shape)
     return data.astype(np.float32)
 
-def quantize(data):
+def quantize_fixed(data, multiplier):
     """
-    Quantizes Float32 data to Int16 for compression.
+    Quantizes Float32 data using a fixed precision multiplier.
+    Formula: int_val = (float_val - offset) * multiplier
     Returns: (int16_data, scale, offset)
     """
-    print("Quantizing data (Float32 -> Int16)...")
-    min_val = np.nanmin(data)
-    max_val = np.nanmax(data)
+    print(f"Quantizing data (Fixed Multiplier: {multiplier}x)...")
     
-    # Map [min, max] -> [-32767, 32767]
-    scale = (max_val - min_val) / (2 * 32767)
-    offset = (max_val + min_val) / 2
+    # We use an offset to center the data or fit it within int16
+    # If we didn't use an offset, 300K * 100 = 30000 (fits), but 330K * 100 overflows.
+    # Using min_val as offset ensures we start from 0.
+    offset = np.nanmin(data)
     
-    data_int16 = np.round((data - offset) / scale).astype(np.int16)
+    # Calculate scale factor for reconstruction (value = int * scale + offset)
+    scale = 1.0 / multiplier
+    
+    # Quantize
+    scaled_data = (data - offset) * multiplier
+    
+    # Check for overflow
+    if np.nanmax(np.abs(scaled_data)) > 32767:
+        print(f"WARNING: Data range too large for multiplier {multiplier} in Int16!")
+    
+    data_int16 = np.round(scaled_data).astype(np.int16)
     return data_int16, scale, offset
 
 def main():
     # 1. Create Data
     data_float = generate_weather_data(SHAPE)
     
-    # 2. Quantize
-    data_int16, scale, offset = quantize(data_float)
+    # 2. Prepare Datasets
+    datasets = []
+    
+    # Case A: High Precision (0.01 K -> Multiplier 100)
+    d_100, s_100, o_100 = quantize_fixed(data_float, 100.0)
+    datasets.append({
+        "name": "temperature_high_res",
+        "desc": "Precision 0.01 (100x)",
+        "data": d_100, "scale": s_100, "offset": o_100
+    })
+    
+    # Case B: Low Precision (0.05 K -> Multiplier 20)
+    d_20, s_20, o_20 = quantize_fixed(data_float, 20.0)
+    datasets.append({
+        "name": "temperature_low_res",
+        "desc": "Precision 0.05 (20x)",
+        "data": d_20, "scale": s_20, "offset": o_20
+    })
     
     # 3. Write Compressed File
     print(f"Writing to {OUTPUT_FILE}...")
@@ -67,33 +94,44 @@ def main():
         os.remove(OUTPUT_FILE)
         
     with h5py.File(OUTPUT_FILE, "w", libver='latest') as f:
-        # Filter Args: [type=0(short), ignored, chunk_dim_vertical, chunk_dim_horizontal]
-        # Note: We pass the last two dimensions of the chunk as the "2D" block size
-        cd_values = (0, 0, CHUNK_SHAPE[1], CHUNK_SHAPE[2])
+        # Filter Args: [type=0(short), ignored, dim0, dim1, dim2, ...]
+        # We pass all chunk dimensions so the filter can flatten them correctly
+        cd_values = (0, 0) + CHUNK_SHAPE
         
-        dset = f.create_dataset(
-            "temperature",
-            data=data_int16,
-            chunks=CHUNK_SHAPE,
-            compression=FILTER_ID,
-            compression_opts=cd_values
-        )
-        
-        # Save quantization parameters as attributes
-        dset.attrs["scale_factor"] = scale
-        dset.attrs["add_offset"] = offset
-        dset.attrs["units"] = "Celsius"
+        for ds_info in datasets:
+            dset = f.create_dataset(
+                ds_info["name"],
+                data=ds_info["data"],
+                chunks=CHUNK_SHAPE,
+                compression=FILTER_ID,
+                compression_opts=cd_values
+            )
+            
+            # Save quantization parameters
+            dset.attrs["scale_factor"] = ds_info["scale"]
+            dset.attrs["add_offset"] = ds_info["offset"]
+            dset.attrs["units"] = "Celsius"
+            dset.attrs["description"] = ds_info["desc"]
 
     # 4. Report Results
-    original_size = data_int16.nbytes
-    compressed_size = os.path.getsize(OUTPUT_FILE)
-    ratio = original_size / compressed_size
+    print("-" * 60)
+    print(f"{'Dataset':<25} | {'Orig (KB)':<10} | {'Comp (KB)':<10} | {'Ratio':<5}")
+    print("-" * 60)
     
-    print("-" * 40)
-    print(f"Original Size (Int16): {original_size / 1024:.2f} KB")
-    print(f"Compressed Size:       {compressed_size / 1024:.2f} KB")
-    print(f"Compression Ratio:     {ratio:.2f}x")
-    print("-" * 40)
+    with h5py.File(OUTPUT_FILE, "r") as f:
+        for ds_info in datasets:
+            name = ds_info["name"]
+            dset = f[name]
+            
+            # Get compressed size (storage size)
+            # Note: get_storage_size() returns the size of the allocated chunks
+            comp_size = dset.id.get_storage_size()
+            orig_size = dset.size * dset.dtype.itemsize
+            ratio = orig_size / comp_size if comp_size > 0 else 0
+            
+            print(f"{name:<25} | {orig_size/1024:<10.2f} | {comp_size/1024:<10.2f} | {ratio:<5.2f}x")
+            
+    print("-" * 60)
     print("Success! You can inspect the file with:")
     print(f"  h5dump -H {OUTPUT_FILE}")
 
