@@ -73,8 +73,10 @@ void delta2d_encode(size_t length0, size_t length1, short* chunkBuffer) {
     }
     size_t d0, d1;
     for (d0 = length0-1; d0 >= 1; d0--) {
+        short* curr = chunkBuffer + d0 * length1;
+        short* prev = chunkBuffer + (d0 - 1) * length1;
         for (d1 = 0; d1 < length1; d1++) {
-            chunkBuffer[d0*length1 + d1] -= chunkBuffer[(d0-1)*length1 + d1];
+            curr[d1] -= prev[d1];
         }
     }
 }
@@ -85,8 +87,10 @@ void delta2d_decode(size_t length0, size_t length1, short* chunkBuffer) {
     }
     size_t d0, d1;
     for (d0 = 1; d0 < length0; d0++) {
+        short* curr = chunkBuffer + d0 * length1;
+        short* prev = chunkBuffer + (d0 - 1) * length1;
         for (d1 = 0; d1 < length1; d1++) {
-            chunkBuffer[d0*length1 + d1] += chunkBuffer[(d0-1)*length1 + d1];
+            curr[d1] += prev[d1];
         }
     }
 }
@@ -159,21 +163,16 @@ DLL_EXPORT size_t turbopfor_filter(unsigned int flags, size_t cd_nelmts,
 		case ELEMENT_TYPE_SHORT:
 		{
 			n = m * sizeof(unsigned short);
-			unsigned char *outbuf_short = (unsigned char *)malloc(CBUF(n) + 1024 * 1024);
+			// Allocate output buffer with padding for SIMD safety
+			out = (unsigned char *)malloc(CBUF(n) + 1024 * 1024);
 
-			p4nzdec128v16((unsigned char *)*buf, m, (uint16_t *)outbuf_short);
-			n = m * sizeof(short);
-			out = (unsigned char *)malloc(n);
+			// Decode directly into the output buffer
+			p4nzdec128v16((unsigned char *)*buf, m, (uint16_t *)out);
 			
-            // Copy decoded data to output buffer
-            memcpy(out, outbuf_short, n);
+            // Apply Delta Decoding in-place
             short *short_p = (short *)out;
-
-            // Apply Delta Decoding
 			delta2d_decode(chunk0, chunk1, short_p);
             
-			free(outbuf_short);
-			outbuf_short = NULL;
 			break;
 		}
 		default:
