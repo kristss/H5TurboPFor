@@ -77,7 +77,7 @@ def run_validation():
     if os.path.exists(FILE_NAME):
         os.remove(FILE_NAME)
 
-    with h5py.File(FILE_NAME, "w") as f:
+    with h5py.File(FILE_NAME, "w", libver='latest') as f:
         # Filter options: [type (0=short), ignored, chunk_dim0, chunk_dim1]
         cd_values = (0, 0, CHUNK_SHAPE[0], CHUNK_SHAPE[1])
         
